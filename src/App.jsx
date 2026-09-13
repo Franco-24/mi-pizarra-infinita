@@ -312,7 +312,7 @@ export default function App() {
     const y = (window.innerHeight / 2 - appState.scrollY) / zoomValue - 160;
 
     const videoElement = {
-      type: "embeddable", // <--- ¡AQUÍ ESTÁ LA CORRECCIÓN! (Antes decía "iframe")
+      type: "embeddable", 
       id: `video_${vid.id}_${Date.now()}`,
       x: x,
       y: y,
@@ -335,7 +335,8 @@ export default function App() {
       isDeleted: false,
       boundElements: null,
       updated: Date.now(),
-      link: `https://drive.google.com/file/d/${vid.id}/preview`, // El enlace de previsualización
+      // ¡EL TRUCO ESTÁ AQUÍ! Usamos uc?export=view para forzar el reproductor nativo
+      link: `https://drive.google.com/uc?export=view&id=${vid.id}`, 
       locked: false,
     };
 
