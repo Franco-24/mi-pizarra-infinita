@@ -287,13 +287,12 @@ export default function App() {
     const appState = excalidrawAPI.getAppState();
     const currentElements = excalidrawAPI.getSceneElements();
 
-    // Cálculo mejorado considerando el nivel de Zoom actual del usuario
     const zoomValue = appState.zoom?.value || 1;
     const x = (window.innerWidth / 2 - appState.scrollX) / zoomValue - 280;
     const y = (window.innerHeight / 2 - appState.scrollY) / zoomValue - 160;
 
     const videoElement = {
-      type: "iframe",
+      type: "embeddable", // <--- ¡AQUÍ ESTÁ LA CORRECCIÓN! (Antes decía "iframe")
       id: `video_${vid.id}_${Date.now()}`,
       x: x,
       y: y,
@@ -316,7 +315,7 @@ export default function App() {
       isDeleted: false,
       boundElements: null,
       updated: Date.now(),
-      link: `https://drive.google.com/file/d/${vid.id}/preview`,
+      link: `https://drive.google.com/file/d/${vid.id}/preview`, // El enlace de previsualización
       locked: false,
     };
 
