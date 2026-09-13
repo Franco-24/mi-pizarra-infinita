@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Excalidraw } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 
@@ -8,12 +8,13 @@ const FILE_NAME = "mi-pizarra-excalidraw.json";
 const LOCAL_STORAGE_KEY = "mi-pizarra-local-cache";
 
 export default function App() {
-  const [excalidrawAPI, setExcalidrawAPI] = useState(null);
   const [status, setStatus] = useState("Listo");
   const [tokenClient, setTokenClient] = useState(null);
   const [accessToken, setAccessToken] = useState(null);
 
-  // Cargar sesión guardada y script de Google al iniciar
+  // Almacena los trazos automáticamente en tiempo real
+  const sceneRef = useRef({ elements: [], appState: {}, files: {} });
+
   useEffect(() => {
     const savedToken = localStorage.getItem("g_access_token");
     if (savedToken) {
@@ -50,7 +51,6 @@ export default function App() {
     }
   };
 
-  // Buscar ID del archivo en Google Drive
   const findFileId = async (token) => {
     try {
       const res = await fetch(
@@ -62,12 +62,12 @@ export default function App() {
         return data.files[0].id;
       }
     } catch (e) {
-      console.error("Error buscando archivo", e);
+      console.error(e);
     }
     return null;
   };
 
-  // Función para GUARDAR en Google Drive (Sistema robusto de 2 pasos)
+  // Función para GUARDAR en Google Drive
   const saveToDrive = async () => {
     const token = accessToken || localStorage.getItem("g_access_token");
     if (!token) {
@@ -75,22 +75,17 @@ export default function App() {
       handleAuthClick();
       return;
     }
-    if (!excalidrawAPI) return;
 
     setStatus("Guardando en Drive...");
     try {
-      const elements = excalidrawAPI.getSceneElements();
-      const appState = excalidrawAPI.getAppState();
-      const files = excalidrawAPI.getFiles();
+      const { elements, appState, files } = sceneRef.current;
       const content = JSON.stringify({ elements, appState, files });
 
-      // También guardamos localmente como respaldo inmediato
+      // Guardar también localmente como respaldo
       localStorage.setItem(LOCAL_STORAGE_KEY, content);
 
-      // Paso 1: Buscar si el archivo ya existe
       let fileId = await findFileId(token);
 
-      // Paso 2: Si no existe, crearlo primero vacío
       if (!fileId) {
         const createRes = await fetch("https://www.googleapis.com/drive/v3/files", {
           method: "POST",
@@ -111,7 +106,6 @@ export default function App() {
         throw new Error("No se pudo crear el archivo en Drive");
       }
 
-      // Paso 3: Subir el contenido real al archivo obtenido
       const uploadRes = await fetch(
         `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
         {
@@ -125,7 +119,7 @@ export default function App() {
       );
 
       if (uploadRes.ok) {
-        setStatus("¡Guardado en Drive con éxito!");
+        setStatus("¡Guardado con éxito!");
         setTimeout(() => setStatus("Conectado a Google"), 3000);
       } else {
         setStatus("Error al subir a Drive");
@@ -144,7 +138,6 @@ export default function App() {
       handleAuthClick();
       return;
     }
-    if (!excalidrawAPI) return;
 
     setStatus("Cargando de Drive...");
     try {
@@ -162,31 +155,16 @@ export default function App() {
       const data = await res.json();
 
       if (data && data.elements) {
-        excalidrawAPI.updateScene({
-          elements: data.elements,
-          appState: data.appState || {},
-          files: data.files || {},
-        });
-        setStatus("¡Cargado desde Drive!");
-        setTimeout(() => setStatus("Conectado a Google"), 3000);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
+        setStatus("¡Cargado! Actualizando...");
+        setTimeout(() => window.location.reload(), 1000);
+      } else {
+        setStatus("El archivo está vacío");
       }
     } catch (error) {
       console.error(error);
       setStatus("Error al cargar");
     }
-  };
-
-  // Cargar respaldo local inicial si existe al abrir la app
-  const getInitialData = () => {
-    try {
-      const localData = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (localData) {
-        return JSON.parse(localData);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return null;
   };
 
   return (
@@ -261,8 +239,17 @@ export default function App() {
       </div>
 
       <Excalidraw
-        initialData={getInitialData()}
-        ref={(api) => setExcalidrawAPI(api)}
+        initialData={() => {
+          try {
+            const localData = localStorage.getItem(LOCAL_STORAGE_KEY);
+            return localData ? JSON.parse(localData) : null;
+          } catch (e) {
+            return null;
+          }
+        }}
+        onChange={(elements, appState, files) => {
+          sceneRef.current = { elements, appState, files };
+        }}
       />
     </div>
   );
