@@ -7,6 +7,15 @@ const SCOPES = "https://www.googleapis.com/auth/drive.file";
 const FILE_NAME = "mi-pizarra-excalidraw.json";
 const LOCAL_STORAGE_KEY = "mi-pizarra-local-cache";
 
+// Función para limpiar datos corruptos y evitar el error de collaborators
+const sanitizeData = (data) => {
+  if (!data) return null;
+  if (data.appState) {
+    delete data.appState.collaborators;
+  }
+  return data;
+};
+
 export default function App() {
   const [status, setStatus] = useState("Listo");
   const [tokenClient, setTokenClient] = useState(null);
@@ -78,7 +87,6 @@ export default function App() {
     try {
       const { elements, appState, files } = sceneRef.current;
       
-      // Limpiamos appState quitando 'collaborators' para evitar el error de Map
       const cleanAppState = { ...appState };
       delete cleanAppState.collaborators;
 
@@ -156,7 +164,8 @@ export default function App() {
       const data = await res.json();
 
       if (data && data.elements) {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
+        const cleanData = sanitizeData(data);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cleanData));
         setStatus("¡Cargado! Actualizando...");
         setTimeout(() => window.location.reload(), 1000);
       } else {
@@ -242,10 +251,14 @@ export default function App() {
         initialData={() => {
           try {
             const localData = localStorage.getItem(LOCAL_STORAGE_KEY);
-            return localData ? JSON.parse(localData) : null;
+            if (localData) {
+              const parsed = JSON.parse(localData);
+              return sanitizeData(parsed);
+            }
           } catch (e) {
             return null;
           }
+          return null;
         }}
         onChange={(elements, appState, files) => {
           sceneRef.current = { elements, appState, files };
