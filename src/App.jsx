@@ -209,8 +209,9 @@ export default function App() {
       form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
       form.append("file", file);
 
+      // 1. Subir el archivo de video
       const res = await fetch(
-        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
@@ -221,7 +222,26 @@ export default function App() {
       if (handleAuthError(res)) return;
 
       if (res.ok) {
-        setStatus("¡Video subido a Drive!");
+        const uploadData = await res.json();
+        const fileId = uploadData.id;
+
+        setStatus("Configurando permisos...");
+
+        // 2. Hacer el archivo público ("Cualquier persona con el enlace") 
+        // para evitar el bloqueo de cookies en el iframe de Excalidraw
+        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            role: "reader",
+            type: "anyone",
+          }),
+        });
+
+        setStatus("¡Video subido y listo!");
         setTimeout(() => setStatus("Conectado a Google"), 3000);
         fetchVideos();
       } else {
