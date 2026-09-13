@@ -12,7 +12,6 @@ export default function App() {
   const [tokenClient, setTokenClient] = useState(null);
   const [accessToken, setAccessToken] = useState(null);
 
-  // Almacena los trazos automáticamente en tiempo real
   const sceneRef = useRef({ elements: [], appState: {}, files: {} });
 
   useEffect(() => {
@@ -67,7 +66,6 @@ export default function App() {
     return null;
   };
 
-  // Función para GUARDAR en Google Drive
   const saveToDrive = async () => {
     const token = accessToken || localStorage.getItem("g_access_token");
     if (!token) {
@@ -79,9 +77,13 @@ export default function App() {
     setStatus("Guardando en Drive...");
     try {
       const { elements, appState, files } = sceneRef.current;
-      const content = JSON.stringify({ elements, appState, files });
+      
+      // Limpiamos appState quitando 'collaborators' para evitar el error de Map
+      const cleanAppState = { ...appState };
+      delete cleanAppState.collaborators;
 
-      // Guardar también localmente como respaldo
+      const content = JSON.stringify({ elements, appState: cleanAppState, files });
+
       localStorage.setItem(LOCAL_STORAGE_KEY, content);
 
       let fileId = await findFileId(token);
@@ -130,7 +132,6 @@ export default function App() {
     }
   };
 
-  // Función para CARGAR desde Google Drive
   const loadFromDrive = async () => {
     const token = accessToken || localStorage.getItem("g_access_token");
     if (!token) {
@@ -169,7 +170,6 @@ export default function App() {
 
   return (
     <div style={{ width: "100vw", height: "100vh", position: "fixed", inset: 0 }}>
-      {/* Panel flotante superior derecho */}
       <div
         style={{
           position: "absolute",
