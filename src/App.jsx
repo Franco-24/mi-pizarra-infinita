@@ -2,10 +2,10 @@ import React, { useState, useEffect } from "react";
 import { Excalidraw } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 
-// Tu ID de Cliente de Google Cloud
 const CLIENT_ID = "566109407372-csgpmbhajsghbfv84aldku66pfisuqe3.apps.googleusercontent.com";
 const SCOPES = "https://www.googleapis.com/auth/drive.file";
 const FILE_NAME = "mi-pizarra-excalidraw.json";
+const LOCAL_STORAGE_KEY = "mi-pizarra-local-cache";
 
 export default function App() {
   const [excalidrawAPI, setExcalidrawAPI] = useState(null);
@@ -13,8 +13,14 @@ export default function App() {
   const [tokenClient, setTokenClient] = useState(null);
   const [accessToken, setAccessToken] = useState(null);
 
-  // Cargar el script de autenticación de Google de forma automática
+  // Cargar sesión guardada y script de Google al iniciar
   useEffect(() => {
+    const savedToken = localStorage.getItem("g_access_token");
+    if (savedToken) {
+      setAccessToken(savedToken);
+      setStatus("Conectado a Google");
+    }
+
     const script = document.createElement("script");
     script.src = "https://accounts.google.com/gsi/client";
     script.async = true;
@@ -26,6 +32,7 @@ export default function App() {
         callback: (response) => {
           if (response.access_token) {
             setAccessToken(response.access_token);
+            localStorage.setItem("g_access_token", response.access_token);
             setStatus("Conectado a Google");
           }
         },
@@ -38,27 +45,32 @@ export default function App() {
   const handleAuthClick = () => {
     if (tokenClient) {
       tokenClient.requestAccessToken();
+    } else {
+      setStatus("Cargando Google...");
     }
   };
 
-  // Buscar si el archivo de la pizarra ya existe en el Google Drive del usuario
+  // Buscar ID del archivo en Google Drive
   const findFileId = async (token) => {
-    const res = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=name='${FILE_NAME}' and trashed=false`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=name='${FILE_NAME}' and trashed=false`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = await res.json();
+      if (data.files && data.files.length > 0) {
+        return data.files[0].id;
       }
-    );
-    const data = await res.json();
-    if (data.files && data.files.length > 0) {
-      return data.files[0].id;
+    } catch (e) {
+      console.error("Error buscando archivo", e);
     }
     return null;
   };
 
-  // Función para GUARDAR en Google Drive
+  // Función para GUARDAR en Google Drive (Sistema robusto de 2 pasos)
   const saveToDrive = async () => {
-    if (!accessToken) {
+    const token = accessToken || localStorage.getItem("g_access_token");
+    if (!token) {
       setStatus("Inicia sesión primero");
       handleAuthClick();
       return;
@@ -72,43 +84,52 @@ export default function App() {
       const files = excalidrawAPI.getFiles();
       const content = JSON.stringify({ elements, appState, files });
 
-      const fileId = await findFileId(accessToken);
+      // También guardamos localmente como respaldo inmediato
+      localStorage.setItem(LOCAL_STORAGE_KEY, content);
 
-      if (fileId) {
-        // Si ya existe, lo actualiza
-        await fetch(
-          `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
-          {
-            method: "PATCH",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json",
-            },
-            body: content,
-          }
-        );
-      } else {
-        // Si no existe, crea un archivo nuevo
-        const metadata = {
-          name: FILE_NAME,
-          mimeType: "application/json",
-        };
+      // Paso 1: Buscar si el archivo ya existe
+      let fileId = await findFileId(token);
 
-        const form = new FormData();
-        form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
-        form.append("file", new Blob([content], { type: "application/json" }));
-
-        await fetch(
-          "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${accessToken}` },
-            body: form,
-          }
-        );
+      // Paso 2: Si no existe, crearlo primero vacío
+      if (!fileId) {
+        const createRes = await fetch("https://www.googleapis.com/drive/v3/files", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: FILE_NAME,
+            mimeType: "application/json",
+          }),
+        });
+        const createData = await createRes.json();
+        fileId = createData.id;
       }
-      setStatus("¡Guardado en Drive con éxito!");
-      setTimeout(() => setStatus("Conectado a Google"), 3000);
+
+      if (!fileId) {
+        throw new Error("No se pudo crear el archivo en Drive");
+      }
+
+      // Paso 3: Subir el contenido real al archivo obtenido
+      const uploadRes = await fetch(
+        `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: content,
+        }
+      );
+
+      if (uploadRes.ok) {
+        setStatus("¡Guardado en Drive con éxito!");
+        setTimeout(() => setStatus("Conectado a Google"), 3000);
+      } else {
+        setStatus("Error al subir a Drive");
+      }
     } catch (error) {
       console.error(error);
       setStatus("Error al guardar");
@@ -117,7 +138,8 @@ export default function App() {
 
   // Función para CARGAR desde Google Drive
   const loadFromDrive = async () => {
-    if (!accessToken) {
+    const token = accessToken || localStorage.getItem("g_access_token");
+    if (!token) {
       setStatus("Inicia sesión primero");
       handleAuthClick();
       return;
@@ -126,18 +148,16 @@ export default function App() {
 
     setStatus("Cargando de Drive...");
     try {
-      const fileId = await findFileId(accessToken);
+      const fileId = await findFileId(token);
       if (!fileId) {
-        setStatus("No hay archivo guardado aún.");
+        setStatus("No hay archivo en Drive.");
         setTimeout(() => setStatus("Conectado a Google"), 3000);
         return;
       }
 
       const res = await fetch(
         `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-        {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        }
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       const data = await res.json();
 
@@ -156,9 +176,22 @@ export default function App() {
     }
   };
 
+  // Cargar respaldo local inicial si existe al abrir la app
+  const getInitialData = () => {
+    try {
+      const localData = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (localData) {
+        return JSON.parse(localData);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return null;
+  };
+
   return (
     <div style={{ width: "100vw", height: "100vh", position: "fixed", inset: 0 }}>
-      {/* Panel flotante superior derecho para conectar y sincronizar */}
+      {/* Panel flotante superior derecho */}
       <div
         style={{
           position: "absolute",
@@ -227,7 +260,10 @@ export default function App() {
         )}
       </div>
 
-      <Excalidraw ref={(api) => setExcalidrawAPI(api)} />
+      <Excalidraw
+        initialData={getInitialData()}
+        ref={(api) => setExcalidrawAPI(api)}
+      />
     </div>
   );
 }
