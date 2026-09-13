@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Excalidraw } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 
@@ -25,6 +25,16 @@ export default function App() {
   const fileInputRef = useRef(null);
   const sceneRef = useRef({ elements: [], appState: {}, files: {} });
   const [excalidrawAPI, setExcalidrawAPI] = useState(null);
+
+  const handleAuthError = (res) => {
+    if (res.status === 401) {
+      localStorage.removeItem("g_access_token");
+      setAccessToken(null);
+      setStatus("Sesión expirada. Inicia sesión de nuevo.");
+      return true;
+    }
+    return false;
+  };
 
   useEffect(() => {
     const savedToken = localStorage.getItem("g_access_token");
@@ -68,6 +78,7 @@ export default function App() {
         `https://www.googleapis.com/drive/v3/files?q=name='${FILE_NAME}' and trashed=false`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      if (handleAuthError(res)) return null;
       const data = await res.json();
       if (data.files && data.files.length > 0) {
         return data.files[0].id;
@@ -109,6 +120,7 @@ export default function App() {
             mimeType: "application/json",
           }),
         });
+        if (handleAuthError(createRes)) return;
         const createData = await createRes.json();
         fileId = createData.id;
       }
@@ -126,6 +138,8 @@ export default function App() {
           body: content,
         }
       );
+
+      if (handleAuthError(uploadRes)) return;
 
       if (uploadRes.ok) {
         setStatus("¡Pizarra guardada!");
@@ -160,6 +174,7 @@ export default function App() {
         `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      if (handleAuthError(res)) return;
       const data = await res.json();
 
       if (data && data.elements) {
@@ -203,6 +218,8 @@ export default function App() {
         }
       );
 
+      if (handleAuthError(res)) return;
+
       if (res.ok) {
         setStatus("¡Video subido a Drive!");
         setTimeout(() => setStatus("Conectado a Google"), 3000);
@@ -226,6 +243,7 @@ export default function App() {
         "https://www.googleapis.com/drive/v3/files?q=mimeType contains 'video/' and trashed=false&fields=files(id, name)",
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      if (handleAuthError(res)) return;
       const data = await res.json();
       if (data.files) {
         setVideos(data.files);
@@ -241,15 +259,38 @@ export default function App() {
     }
   }, [accessToken]);
 
-  // Insertar el video como un elemento flotante interactivo en el lienzo
+  const handleSceneChange = useCallback((elements, appState, files) => {
+    sceneRef.current = { elements, appState, files };
+    
+    const timeoutId = setTimeout(() => {
+      try {
+        const cleanAppState = { ...appState };
+        delete cleanAppState.collaborators;
+        localStorage.setItem(
+          LOCAL_STORAGE_KEY,
+          JSON.stringify({ elements, appState: cleanAppState, files })
+        );
+      } catch (err) {
+        console.error("Error en autoguardado local:", err);
+      }
+    }, 1000);
+
+    return () => clearTimeout(timeoutId);
+  }, []);
+
   const insertVideoToCanvas = (vid) => {
-    if (!excalidrawAPI) return;
+    if (!excalidrawAPI) {
+      console.error("La API de Excalidraw no está conectada.");
+      return;
+    }
 
     const appState = excalidrawAPI.getAppState();
     const currentElements = excalidrawAPI.getSceneElements();
 
-    const x = appState.scrollX + window.innerWidth / 2 - 280;
-    const y = appState.scrollY + window.innerHeight / 2 - 160;
+    // Cálculo mejorado considerando el nivel de Zoom actual del usuario
+    const zoomValue = appState.zoom?.value || 1;
+    const x = (window.innerWidth / 2 - appState.scrollX) / zoomValue - 280;
+    const y = (window.innerHeight / 2 - appState.scrollY) / zoomValue - 160;
 
     const videoElement = {
       type: "iframe",
@@ -298,12 +339,13 @@ export default function App() {
         style={{ display: "none" }}
       />
 
-      {/* Panel flotante superior derecho */}
+      {/* Menú reubicado a la parte inferior central para no estorbar a Excalidraw */}
       <div
         style={{
           position: "absolute",
-          top: 15,
-          right: 20,
+          bottom: 30, // Movido abajo
+          left: "50%", // Centrado horizontalmente
+          transform: "translateX(-50%)", // Ajuste para centrar perfecto
           zIndex: 1000,
           display: "flex",
           alignItems: "center",
@@ -355,7 +397,6 @@ export default function App() {
         )}
       </div>
 
-      {/* Modal para seleccionar qué video insertar en el lienzo */}
       {showVideoModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 2000, display: "flex", justifyContent: "center", alignItems: "center" }}>
           <div style={{ background: "white", width: "90%", maxWidth: "550px", maxHeight: "80vh", borderRadius: "12px", padding: "20px", display: "flex", flexDirection: "column", boxShadow: "0 10px 25px rgba(0,0,0,0.3)" }}>
@@ -391,7 +432,8 @@ export default function App() {
       )}
 
       <Excalidraw
-        ref={(api) => setExcalidrawAPI(api)}
+        /* ¡CORRECCIÓN CRÍTICA AQUÍ! excalidrawAPI en vez de ref */
+        excalidrawAPI={(api) => setExcalidrawAPI(api)}
         initialData={() => {
           try {
             const localData = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -404,9 +446,7 @@ export default function App() {
           }
           return null;
         }}
-        onChange={(elements, appState, files) => {
-          sceneRef.current = { elements, appState, files };
-        }}
+        onChange={handleSceneChange}
         validateEmbeddable={() => true}
       />
     </div>
